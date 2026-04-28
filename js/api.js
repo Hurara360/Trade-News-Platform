@@ -4,7 +4,7 @@
  */
 
 // Configuration - YOUR BACKEND URL
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = 'const API_BASE_URL = 'https://bountiful-consideration-production.up.railway.app/api';
 const UPDATE_INTERVAL = 10000; // 10 seconds
 
 // API Client
