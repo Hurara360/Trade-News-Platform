@@ -1138,10 +1138,15 @@ async function loadMarkets() {
 
 async function loadNews() {
     try {
-        const [war, trade] = await Promise.allSettled([
+        const [war, trade, markets, crypto, tech] = await Promise.allSettled([
             window.SW_API.getNews('war'),
             window.SW_API.getNews('trade'),
+            window.SW_API.getNews('markets'),
+            window.SW_API.getNews('crypto'),
+            window.SW_API.getNews('tech'),
         ]);
+
+        // War feed — single category
         if (war.status === 'fulfilled' && war.value.data?.data?.length) {
             state.warNews = war.value.data.data;
             renderNewsFeed('war-feed', state.warNews, state.warFilter, document.getElementById('war-search')?.value||'');
@@ -1152,10 +1157,20 @@ async function loadNews() {
                 <button class="retry-btn" onclick="loadNews()">RETRY</button>
             </div>`;
         }
-        if (trade.status === 'fulfilled' && trade.value.data?.data?.length) {
-            state.tradeNews = trade.value.data.data;
+
+        // Trade feed — merge trade + markets + crypto + tech, sort newest first
+        const combined = [];
+        for (const result of [trade, markets, crypto, tech]) {
+            if (result.status === 'fulfilled' && result.value.data?.data?.length) {
+                combined.push(...result.value.data.data);
+            }
+        }
+        combined.sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
+
+        if (combined.length) {
+            state.tradeNews = combined;
             renderNewsFeed('trade-feed', state.tradeNews, state.tradeFilter, document.getElementById('trade-search')?.value||'');
-        } else if (trade.status === 'fulfilled') {
+        } else {
             document.getElementById('trade-feed').innerHTML = `<div class="error-state" style="height:100%">
                 <i class="fa-solid fa-triangle-exclamation" style="color:var(--t2)"></i>
                 <span class="label">Trade news temporarily unavailable</span>
@@ -1173,7 +1188,7 @@ async function doRefreshAll() {
     btn.disabled = true;
     icon.style.animation = 'spin .75s linear infinite';
     // Invalidate caches
-    ['signals','markets_forex','markets_crypto','markets_stocks','markets_commodities','news_war','news_trade','all_data'].forEach(k => window.SW_API.cache.invalidate(k));
+    ['signals','markets_forex','markets_crypto','markets_stocks','markets_commodities','news_war','news_trade','news_markets','news_crypto','news_tech','all_data'].forEach(k => window.SW_API.cache.invalidate(k));
     await Promise.all([loadSignals(), loadMarkets(), loadNews()]);
     await loadChart();
     icon.style.animation = '';
