@@ -1,263 +1,125 @@
-/**
- * Frontend API Integration
- * Connects Sami's HTML to your backend
- */
+'use strict';
 
-// Configuration - YOUR BACKEND URL
-const API_BASE_URL = 'https://bountiful-consideration-production.up.railway.app/api';
-const UPDATE_INTERVAL = 10000; // 10 seconds
-
-// API Client
-class TradeNewsAPI {
-    constructor(baseUrl) {
-        this.baseUrl = baseUrl;
-    }
-
-    async fetchNews(category) {
-        try {
-            const response = await fetch(`${this.baseUrl}/news/${category}`);
-            if (!response.ok) throw new Error('News fetch failed');
-            const data = await response.json();
-            return data.data;
-        } catch (error) {
-            console.error(`Error fetching ${category} news:`, error);
-            return [];
-        }
-    }
-
-    async fetchMarkets(category) {
-        try {
-            const response = await fetch(`${this.baseUrl}/markets/${category}`);
-            if (!response.ok) throw new Error('Markets fetch failed');
-            const data = await response.json();
-            return data.data;
-        } catch (error) {
-            console.error(`Error fetching ${category} markets:`, error);
-            return [];
-        }
-    }
-
-    async fetchSignals() {
-        try {
-            const response = await fetch(`${this.baseUrl}/signals`);
-            if (!response.ok) throw new Error('Signals fetch failed');
-            const data = await response.json();
-            return data.data;
-        } catch (error) {
-            console.error('Error fetching signals:', error);
-            return [];
-        }
-    }
-
-    async fetchAllData() {
-        try {
-            const response = await fetch(`${this.baseUrl}/all`);
-            if (!response.ok) throw new Error('All data fetch failed');
-            const data = await response.json();
-            return data.data;
-        } catch (error) {
-            console.error('Error fetching all data:', error);
-            return null;
-        }
-    }
-}
-
-// Initialize API client
-const api = new TradeNewsAPI(API_BASE_URL);
-
-// Data store
-let liveData = {
-    news: { war: [], trade: [], markets: [] },
-    markets: { forex: [], crypto: [], stocks: [], commodities: [] },
-    signals: []
+const SW_CONFIG = {
+    API: 'https://bountiful-consideration-production.up.railway.app/api',
+    INTERVALS: {
+        signals:  60_000,   // 1 min
+        markets:  30_000,   // 30 sec
+        news:    300_000,   // 5 min
+    },
+    TTL: {
+        signals:  55_000,
+        markets:  25_000,
+        news:    290_000,
+        chart:   300_000,
+    },
 };
 
-/**
- * Load real news data
- */
-async function loadRealNews() {
-    try {
-        const [war, trade, markets] = await Promise.all([
-            api.fetchNews('war'),
-            api.fetchNews('trade'),
-            api.fetchNews('markets')
-        ]);
+class Cache {
+    constructor() { this._s = new Map(); }
+    set(k, data, ttl) {
+        this._s.set(k, { data, at: Date.now(), exp: Date.now() + ttl });
+    }
+    get(k) {
+        const e = this._s.get(k);
+        if (!e) return null;
+        if (Date.now() > e.exp) { this._s.delete(k); return null; }
+        return e;
+    }
+    age(k) {
+        const e = this._s.get(k);
+        return e ? Math.round((Date.now() - e.at) / 1000) : 0;
+    }
+    invalidate(k) { this._s.delete(k); }
+}
 
-        liveData.news.war = war;
-        liveData.news.trade = trade;
-        liveData.news.markets = markets;
+class UsageTracker {
+    constructor() { this._c = {}; }
+    inc(svc) { this._c[svc] = (this._c[svc] || 0) + 1; }
+    status(svc) { return `${this._c[svc] || 0} req`; }
+}
 
-        // Update global newsDB (used by existing HTML code)
-        if (typeof newsDB !== 'undefined') {
-            newsDB.war = war.map(item => ({
-                headline: item.headline,
-                source: item.source,
-                location: item.location || 'Global',
-                urgency: { 
-                    text: item.urgency || 'NEWS', 
-                    bg: item.urgency === 'BREAKING' ? '#C0392B' : 
-                        item.urgency === 'DEVELOPING' ? '#E67E22' : '#555'
-                }
-            }));
-
-            newsDB.trade = trade.map(item => ({
-                headline: item.headline,
-                source: item.source,
-                change: '+0.87%',
-                isPositive: true
-            }));
-        }
-
-        console.log('✅ News loaded:', { war: war.length, trade: trade.length, markets: markets.length });
-
-    } catch (error) {
-        console.error('❌ Failed to load news:', error);
+class UpdateScheduler {
+    constructor() { this._j = new Map(); }
+    register(name, fn, interval) {
+        if (this._j.has(name)) clearInterval(this._j.get(name));
+        this._j.set(name, setInterval(fn, interval));
     }
 }
 
-/**
- * Load real market data
- */
-async function loadRealMarkets() {
-    try {
-        const [forex, crypto, stocks, commodities] = await Promise.all([
-            api.fetchMarkets('forex'),
-            api.fetchMarkets('crypto'),
-            api.fetchMarkets('stocks'),
-            api.fetchMarkets('commodities')
-        ]);
-
-        liveData.markets.forex = forex;
-        liveData.markets.crypto = crypto;
-        liveData.markets.stocks = stocks;
-        liveData.markets.commodities = commodities;
-
-        // Update global dataMap (used by existing HTML code)
-        if (typeof dataMap !== 'undefined') {
-            if (forex.length > 0) {
-                dataMap.forex = forex.map(item => ({
-                    name: item.symbol,
-                    price: item.price,
-                    change: item.change_24h || 0
-                }));
-            }
-
-            if (crypto.length > 0) {
-                dataMap.crypto = crypto.map(item => ({
-                    name: item.symbol,
-                    price: item.price,
-                    change: item.change_24h || 0
-                }));
-            }
-
-            if (stocks.length > 0) {
-                dataMap.stocks = stocks.map(item => ({
-                    name: item.symbol,
-                    price: item.price,
-                    change: item.change_24h || 0
-                }));
-            }
-
-            if (commodities.length > 0) {
-                dataMap.commodities = commodities.map(item => ({
-                    name: item.symbol,
-                    price: item.price,
-                    change: item.change_24h || 0
-                }));
-            }
+async function apiFetch(url, retries = 2) {
+    for (let i = 0; i <= retries; i++) {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 15000);
+        try {
+            const res = await fetch(url, { signal: ctrl.signal });
+            clearTimeout(t);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        } catch (e) {
+            clearTimeout(t);
+            if (i < retries) await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+            else throw e;
         }
+    }
+}
 
-        console.log('✅ Markets loaded:', { 
-            forex: forex.length, 
-            crypto: crypto.length, 
-            stocks: stocks.length, 
-            commodities: commodities.length 
+const _cache   = new Cache();
+const _tracker = new UsageTracker();
+
+window.SW_CONFIG  = SW_CONFIG;
+window.SW_UPDATES = new UpdateScheduler();
+window.SW_API = {
+    cache:   _cache,
+    tracker: _tracker,
+
+    async getSentimentSignals() {
+        const k = 'signals';
+        const hit = _cache.get(k);
+        if (hit) return { data: hit.data, fromCache: true, ageSeconds: _cache.age(k) };
+        _tracker.inc('newsapi');
+        const raw = await apiFetch(`${SW_CONFIG.API}/signals`);
+        _cache.set(k, raw.data, SW_CONFIG.TTL.signals);
+        return { data: raw.data, fromCache: false, ageSeconds: 0 };
+    },
+
+    async getAllMarkets() {
+        const cats = ['forex', 'crypto', 'stocks', 'commodities'];
+        const hits = cats.map(c => _cache.get(`markets_${c}`));
+        if (hits.every(Boolean)) {
+            return Object.fromEntries(cats.map((c, i) => [c, hits[i].data]));
+        }
+        _tracker.inc('alphavantage');
+        const results = await Promise.allSettled(
+            cats.map(c => apiFetch(`${SW_CONFIG.API}/markets/${c}`).then(r => r.data || []))
+        );
+        const out = {};
+        cats.forEach((c, i) => {
+            const data = results[i].status === 'fulfilled' ? results[i].value : [];
+            out[c] = data;
+            _cache.set(`markets_${c}`, data, SW_CONFIG.TTL.markets);
         });
+        return out;
+    },
 
-        // Re-render grids with real data
-        if (typeof renderMarketGrid === 'function') {
-            ['forex', 'crypto', 'stocks', 'commodities'].forEach(renderMarketGrid);
-        }
+    async getNews(category) {
+        const k = `news_${category}`;
+        const hit = _cache.get(k);
+        if (hit) return { data: { data: hit.data }, fromCache: true };
+        _tracker.inc('newsapi');
+        const raw = await apiFetch(`${SW_CONFIG.API}/news/${category}`);
+        const articles = raw.data || [];
+        _cache.set(k, articles, SW_CONFIG.TTL.news);
+        return { data: { data: articles }, fromCache: false };
+    },
 
-    } catch (error) {
-        console.error('❌ Failed to load markets:', error);
-    }
-}
-
-/**
- * Load real trading signals
- */
-async function loadRealSignals() {
-    try {
-        const signals = await api.fetchSignals();
-        liveData.signals = signals;
-
-        console.log('✅ Signals loaded:', signals.length);
-
-        // Update signals display if function exists
-        if (typeof updateSignals === 'function') {
-            updateSignals();
-        }
-
-    } catch (error) {
-        console.error('❌ Failed to load signals:', error);
-    }
-}
-
-/**
- * Initialize - Load all data on page load
- */
-async function initializeRealData() {
-    console.log('🚀 Initializing real data...');
-    
-    // Show loading indicator
-    const loadingDiv = document.createElement('div');
-    loadingDiv.id = 'loading-overlay';
-    loadingDiv.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;z-index:9999;';
-    loadingDiv.innerHTML = `
-        <div style="text-align:center;">
-            <div class="live-dot" style="margin:0 auto 16px;"></div>
-            <p style="font-family:monospace;color:#C9A84C;font-size:14px;">Loading real-time data...</p>
-        </div>
-    `;
-    document.body.appendChild(loadingDiv);
-
-    try {
-        // Load all data
-        await Promise.all([
-            loadRealNews(),
-            loadRealMarkets(),
-            loadRealSignals()
-        ]);
-
-        console.log('✅ All data loaded successfully');
-    } catch (error) {
-        console.error('❌ Initialization failed:', error);
-    } finally {
-        // Remove loading indicator
-        const overlay = document.getElementById('loading-overlay');
-        if (overlay) overlay.remove();
-    }
-
-    // Setup auto-refresh
-    setInterval(async () => {
-        await loadRealMarkets();
-        await loadRealSignals();
-    }, UPDATE_INTERVAL);
-
-    // News updates less frequently (every 5 minutes)
-    setInterval(async () => {
-        await loadRealNews();
-    }, 300000);
-}
-
-// Auto-initialize when DOM ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        setTimeout(initializeRealData, 1000);
-    });
-} else {
-    setTimeout(initializeRealData, 1000);
-}
-
-console.log('✅ Trade News API integration loaded');
+    async getCryptoHistory(coinId, days) {
+        const k = `chart_${coinId}_${days}`;
+        const hit = _cache.get(k);
+        if (hit) return { data: hit.data, fromCache: true };
+        const url = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`;
+        const data = await apiFetch(url, 1);
+        _cache.set(k, data, SW_CONFIG.TTL.chart);
+        return { data, fromCache: false };
+    },
+};
