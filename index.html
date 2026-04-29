@@ -1184,6 +1184,7 @@ async function doRefreshAll() {
    API BUDGET DISPLAY
 ───────────────────────────────────────────── */
 function updateBudgetDisplay() {
+    if (!window.SW_API) return;
     const tracker = window.SW_API.tracker;
     setEl('bottom-newsapi', `NewsAPI: ${tracker.status('newsapi')}`);
     setEl('bottom-cache', `AlphaVantage: ${tracker.status('alphavantage')}`);
