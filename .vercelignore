@@ -1,0 +1,7 @@
+backend/
+.git/
+.claude/
+node_modules/
+*.backup
+.gitignore
+README.md
