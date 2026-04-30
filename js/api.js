@@ -50,7 +50,7 @@ class UpdateScheduler {
 async function apiFetch(url, retries = 2) {
     for (let i = 0; i <= retries; i++) {
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 15000);
+        const t = setTimeout(() => ctrl.abort(), 20000);
         try {
             const res = await fetch(url, { signal: ctrl.signal });
             clearTimeout(t);
@@ -58,6 +58,10 @@ async function apiFetch(url, retries = 2) {
             return res.json();
         } catch (e) {
             clearTimeout(t);
+            if (e.name === 'AbortError') {
+                if (i < retries) { await new Promise(r => setTimeout(r, 1500 * (i + 1))); continue; }
+                throw new Error('Request timed out — backend may be starting up, try again');
+            }
             if (i < retries) await new Promise(r => setTimeout(r, 1500 * (i + 1)));
             else throw e;
         }
@@ -79,8 +83,16 @@ window.SW_API = {
         if (hit) return { data: hit.data, fromCache: true, ageSeconds: _cache.age(k) };
         _tracker.inc('newsapi');
         const raw = await apiFetch(`${SW_CONFIG.API}/signals`);
-        _cache.set(k, raw.data, SW_CONFIG.TTL.signals);
-        return { data: raw.data, fromCache: false, ageSeconds: 0 };
+        // Backend returns {data: [...signals array...]} — normalize into the shape loadSignals expects
+        const signals = Array.isArray(raw.data) ? raw.data : (raw.data?.signals || []);
+        const normalized = {
+            signals,
+            summary:       raw.data?.summary       || {},
+            top_movers:    raw.data?.top_movers     || [],
+            article_count: raw.data?.article_count  ?? signals.length,
+        };
+        _cache.set(k, normalized, SW_CONFIG.TTL.signals);
+        return { data: normalized, fromCache: false, ageSeconds: 0 };
     },
 
     async getAllMarkets() {
